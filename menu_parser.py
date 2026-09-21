@@ -39,6 +39,11 @@ def _parse_local(texto):
         m = re.split(r"\s+[-–—:]\s+", linha, maxsplit=1)
         if len(m) == 2:
             nome, descricao = m[0].strip(), m[1].strip()
+        elif "," in linha:
+            # 2) Regra principal: o nome do prato (negrito) vai até a
+            #    primeira vírgula; o resto (acompanhamentos) fica normal.
+            pos = linha.find(",")
+            nome, descricao = linha[:pos].strip(), linha[pos:].strip()
         else:
             # 2) Procura o primeiro conector (" ao ", " com ", " no "...) que
             #    normalmente introduz a descrição do acompanhamento, desde

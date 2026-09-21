@@ -37,28 +37,29 @@ FONT_FILES = {
     "archivo_bold": "Archivo-Bold.ttf",
 }
 
-# fallbacks já presentes no ambiente, usados só se a fonte "de verdade"
-# ainda não tiver sido colocada na pasta /fonts
+# fallbacks: primeiro tenta fontes reserva empacotadas dentro do próprio
+# projeto (fonts/_bundled/, sempre disponíveis independente do ambiente/SO,
+# incluindo a Vercel), depois tenta fontes do sistema operacional (útil em
+# ambientes que já as tenham, como esta máquina de desenvolvimento).
+def _bundled(filename):
+    return os.path.join(FONTS_DIR, "_bundled", filename)
+
+
+# Fonte reserva unica, sempre empacotada dentro do proprio projeto
+# (fonts/_bundled/DejaVuSans.ttf), usada para qualquer papel que nao tenha
+# a fonte oficial (Special Elite / Playfair Display / Archivo) instalada
+# em fonts/. Mantem tudo legivel e no lugar certo em qualquer ambiente,
+# inclusive a Vercel, sem depender de fontes do sistema operacional.
+_UNICA = _bundled("DejaVuSans.ttf")
+_SISTEMA = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+
 _FALLBACK_CANDIDATES = {
-    "special_elite": [
-        "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
-        "/usr/share/fonts/truetype/freefont/FreeMono.ttf",
-    ],
-    "playfair_black": [
-        "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf",
-    ],
-    "playfair_black_italic": [
-        "/usr/share/fonts/truetype/dejavu/DejaVuSerif-BoldItalic.ttf",
-    ],
-    "playfair_light_italic": [
-        "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Italic.ttf",
-    ],
-    "archivo_regular": [
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-    ],
-    "archivo_bold": [
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-    ],
+    "special_elite": [_UNICA, _SISTEMA],
+    "playfair_black": [_UNICA, _SISTEMA],
+    "playfair_black_italic": [_UNICA, _SISTEMA],
+    "playfair_light_italic": [_UNICA, _SISTEMA],
+    "archivo_regular": [_UNICA, _SISTEMA],
+    "archivo_bold": [_UNICA, _SISTEMA],
 }
 
 _font_cache = {}
@@ -204,8 +205,8 @@ LOGO_GAP_AFTER_BANNER = 11
 
 # tamanhos "nominais" (tamanho de referência com o menu de 6 pratos)
 NOM_BODY_SIZE = 33
-NOM_LINE_HEIGHT = 53
-NOM_DISH_GAP_EXTRA = 16
+NOM_LINE_HEIGHT = 46
+NOM_DISH_GAP_EXTRA = 10
 MIN_BODY_SIZE = 22  # nunca encolhe além disso; deixa transbordar com elegância
 
 
@@ -256,19 +257,42 @@ def gerar_cardapio(
 
     # ---- Título "Almoço" / "do Dia" -----------------------------------
     f_tit_black = get_font("playfair_black", 92)
-    f_tit_light_italic = get_font("playfair_light_italic", 76)
 
     y = TITULO_TOP
     w1 = draw.textlength(titulo_linha1, font=f_tit_black)
     draw.text((center_x - w1 / 2, y), titulo_linha1, font=f_tit_black, fill=COR_TEXTO)
     y += 100
 
-    espaco = draw.textlength(" ", font=f_tit_black)
-    w_do = draw.textlength(titulo_conector, font=f_tit_light_italic)
+    # tamanho do "do" calibrado pela altura real do glifo de "Dia" nesta
+    # fonte (evita depender de que a fonte italica tenha as mesmas
+    # proporcoes/tamanho nominal da fonte black - cada família de fonte
+    # escala diferente no mesmo tamanho em pontos)
     w_dia = draw.textlength(titulo_linha2, font=f_tit_black)
+    bbox_dia = draw.textbbox((0, 0), titulo_linha2, font=f_tit_black)
+    altura_dia = bbox_dia[3] - bbox_dia[1]
+
+    tam_italic = 76
+    f_tit_light_italic = get_font("playfair_light_italic", tam_italic)
+    bbox_do = draw.textbbox((0, 0), titulo_conector, font=f_tit_light_italic)
+    altura_do = max(bbox_do[3] - bbox_do[1], 1)
+    alvo = altura_dia * 0.72
+    if abs(altura_do - alvo) > altura_dia * 0.1:
+        tam_italic = max(20, round(tam_italic * (alvo / altura_do)))
+        f_tit_light_italic = get_font("playfair_light_italic", tam_italic)
+        bbox_do = draw.textbbox((0, 0), titulo_conector, font=f_tit_light_italic)
+
+    w_do = draw.textlength(titulo_conector, font=f_tit_light_italic)
+    espaco = draw.textlength(" ", font=f_tit_black)
     total_w = w_do + espaco + w_dia
     x_line2 = center_x - total_w / 2
-    draw.text((x_line2, y + 12), titulo_conector, font=f_tit_light_italic, fill=COR_VINHO)
+
+    # alinha "do" e "Dia" pela base (independente de metricas de cada fonte)
+    bbox_dia_pos = draw.textbbox((x_line2 + w_do + espaco, y), titulo_linha2, font=f_tit_black)
+    base_dia = bbox_dia_pos[3]
+    bbox_do_trial = draw.textbbox((x_line2, y), titulo_conector, font=f_tit_light_italic)
+    y_do = y + (base_dia - bbox_do_trial[3])
+
+    draw.text((x_line2, y_do), titulo_conector, font=f_tit_light_italic, fill=COR_VINHO)
     draw.text((x_line2 + w_do + espaco, y), titulo_linha2, font=f_tit_black, fill=COR_TEXTO)
 
     # ---- Linha divisória ----------------------------------------------
@@ -330,17 +354,21 @@ def gerar_cardapio(
     # ---- Logo ------------------------------------------------------------
     logo_path = logo_path or os.path.join(STATIC_DIR, "logo.png")
     if os.path.exists(logo_path):
-        logo = Image.open(logo_path).convert("RGBA")
-        logo_w = 260
-        ratio = logo_w / logo.width
-        logo_h = int(logo.height * ratio)
-        logo = logo.resize((logo_w, logo_h), Image.LANCZOS)
-        logo_x = center_x - logo_w // 2
-        logo_y = banner_bottom + LOGO_GAP_AFTER_BANNER
-        # garante que a logo nunca ultrapasse a moldura inferior
-        max_logo_y = CANVAS_H - MARGIN - logo_h - 10
-        logo_y = min(logo_y, max_logo_y)
-        img.paste(logo, (logo_x, logo_y), logo)
+        try:
+            logo = Image.open(logo_path).convert("RGBA")
+            logo_w = 260
+            ratio = logo_w / logo.width
+            logo_h = int(logo.height * ratio)
+            logo = logo.resize((logo_w, logo_h), Image.LANCZOS)
+            logo_x = center_x - logo_w // 2
+            logo_y = banner_bottom + LOGO_GAP_AFTER_BANNER
+            # garante que a logo nunca ultrapasse a moldura inferior
+            max_logo_y = CANVAS_H - MARGIN - logo_h - 10
+            logo_y = min(logo_y, max_logo_y)
+            img.paste(logo, (logo_x, logo_y), logo)
+        except Exception:
+            # logo ausente ou corrompida: segue sem travar a geracao da imagem
+            pass
 
     if output_path:
         img.save(output_path, "PNG")
